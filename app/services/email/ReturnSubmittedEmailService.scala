@@ -47,56 +47,81 @@ class ReturnSubmittedEmailService @Inject()(
                                 obligation: ObligationDetails
                               )(using HeaderCarrier): Future[Unit] =
     getPaymentDueDate(vpdId, result).flatMap { paymentDueDate =>
-      val recipient = List(submission.declaration.signeesEmailAddress)
-      val returnPeriod = obligation.iCFromDate.format(RETURN_PERIOD_FORMATTER)
-      val submissionDate = LocalDate.ofInstant(result.processingDate, ZONE_ID).format(SUBMISSION_DATE_FORMATTER)
 
-      val email: Email =
-        if (result.amount > 0 && paymentDueDate.nonEmpty) {
-          DutyDueEmail(
-            to = recipient,
-            parameters = DutyDueEmailParameters(
-              recipientName = submission.declaration.fullName,
-              returnPeriod = returnPeriod,
-              submissionDate = submissionDate,
-              chargeReference = result.chargeReference.getOrElse(""),
-              amountDue = currencyFormat(result.amount),
-              paymentDueDate = paymentDueDate.fold("")(_.format(PAYMENT_DUE_FORMATTER))
-            )
-          )
-        } else if (result.amount > 0) {
-          DutyDueNoDueDateEmail(
-            to = recipient,
-            parameters = DutyDueNoDueDateEmailParameters(
-              recipientName = submission.declaration.fullName,
-              returnPeriod = returnPeriod,
-              submissionDate = submissionDate,
-              chargeReference = result.chargeReference.getOrElse(""),
-              amountDue = currencyFormat(result.amount)
-            )
-          )
-        } else if (result.amount < 0) {
-          CreditDueEmail(
-            to = recipient,
-            parameters = CreditDueEmailParameters(
-              recipientName = submission.declaration.fullName,
-              returnPeriod = returnPeriod,
-              submissionDate = submissionDate,
-              creditAmount = currencyFormat(result.amount.abs)
-            )
-          )
-        } else {
-          NilReturnEmail(
-            to = recipient,
-            parameters = NilReturnEmailParameters(
-              recipientName = submission.declaration.fullName,
-              returnPeriod = returnPeriod,
-              submissionDate = submissionDate
-            )
-          )
-        }
+      // ============================================================================
+      // TEMPORARY CHANGE: Only send email if payment due date is available
+      // ============================================================================
+      // This is a temporary guard to prevent sending duty due emails when the
+      // payment due date cannot be retrieved from the financial API.
+      //
+      // Context: The financial API may fail or not be updated in time, resulting
+      // in paymentDueDate being None. Until the DutyDueNoDueDateEmail template
+      // content is updated and tested, we suppress the email in this scenario.
+      //
+      // TODO: Remove this conditional check once:
+      //   1. DutyDueNoDueDateEmail template content is updated in hmrc-email-renderer
+      //   2. Template changes are tested in QA environment
+      //   3. Template changes are deployed to production
+      //
+      // To revert: Remove the if/else wrapper and return to sending all emails
+      // regardless of payment due date availability.
+      // ============================================================================
 
-      emailConnector.postEmail(email, emailType = "return submitted")
+      if (paymentDueDate.isDefined) {
+        val recipient = List(submission.declaration.signeesEmailAddress)
+        val returnPeriod = obligation.iCFromDate.format(RETURN_PERIOD_FORMATTER)
+        val submissionDate = LocalDate.ofInstant(result.processingDate, ZONE_ID).format(SUBMISSION_DATE_FORMATTER)
+
+        val email: Email =
+          if (result.amount > 0 && paymentDueDate.nonEmpty) {
+            DutyDueEmail(
+              to = recipient,
+              parameters = DutyDueEmailParameters(
+                recipientName = submission.declaration.fullName,
+                returnPeriod = returnPeriod,
+                submissionDate = submissionDate,
+                chargeReference = result.chargeReference.getOrElse(""),
+                amountDue = currencyFormat(result.amount),
+                paymentDueDate = paymentDueDate.fold("")(_.format(PAYMENT_DUE_FORMATTER))
+              )
+            )
+//          } else if (result.amount > 0) {
+//            DutyDueNoDueDateEmail(
+//              to = recipient,
+//              parameters = DutyDueNoDueDateEmailParameters(
+//                recipientName = submission.declaration.fullName,
+//                returnPeriod = returnPeriod,
+//                submissionDate = submissionDate,
+//                chargeReference = result.chargeReference.getOrElse(""),
+//                amountDue = currencyFormat(result.amount)
+//              )
+//            )
+          } else if (result.amount < 0) {
+            CreditDueEmail(
+              to = recipient,
+              parameters = CreditDueEmailParameters(
+                recipientName = submission.declaration.fullName,
+                returnPeriod = returnPeriod,
+                submissionDate = submissionDate,
+                creditAmount = currencyFormat(result.amount.abs)
+              )
+            )
+          } else {
+            NilReturnEmail(
+              to = recipient,
+              parameters = NilReturnEmailParameters(
+                recipientName = submission.declaration.fullName,
+                returnPeriod = returnPeriod,
+                submissionDate = submissionDate
+              )
+            )
+          }
+
+        emailConnector.postEmail(email, emailType = "return submitted")
+      } else {
+        // Temporary: Suppress email when duty is due but payment date unavailable
+        Future.successful(())
+      }
     }
 
   private def getPaymentDueDate(

@@ -125,20 +125,27 @@ class ReturnSubmittedEmailServiceSpec extends SpecBase {
         email.parameters.paymentDueDate mustBe "15 November 2026"
       }
 
-      "must send DutyDueNoDueDateEmail when charge reference is empty" in new SetUp {
+      // ============================================================================
+      // TEMPORARY TEST CHANGE: This test behavior has changed
+      // ============================================================================
+      // The test below has been updated because the service now suppresses emails
+      // when duty is due but payment due date is unavailable (returns None).
+      //
+      // Original behavior: Sent DutyDueNoDueDateEmail
+      // New behavior: No email sent
+      //
+      // TODO: Revert this test when the temporary code change is reverted
+      // ============================================================================
+      "must not send any email when charge reference is empty and payment due date unavailable" in new SetUp {
         when(mockFinancialDataService.getPaymentDueDate(
           eqTo(vpdId),
           eqTo("")
         )(using any[HeaderCarrier]))
-          .thenReturn(Future.successful(Some(LocalDate.of(2026, 11, 15))))
-
-        stubSuccessfulPost()
+          .thenReturn(Future.successful(None))
 
         service.sendReturnSubmittedEmail(vpdId, submission(220.00), response(220.00, None), obligation).futureValue
 
-        val sent: Email = captureEmail()
-        sent mustBe a[DutyDueNoDueDateEmail]
-        val email: DutyDueNoDueDateEmail = sent.asInstanceOf[DutyDueNoDueDateEmail]
+        verify(mockEmailConnector, never()).postEmail(any(), any())(using any())
       }
     }
 
